@@ -14,8 +14,8 @@ async function callGemini(prompt) {
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 0.2,       // Low temperature for consistent structured output
-        maxOutputTokens: 2048,
+        temperature: 0.2,
+        maxOutputTokens: 8192,  // Increased to handle long skill lists
       },
     }),
   });
@@ -28,6 +28,58 @@ async function callGemini(prompt) {
   const data = await response.json();
   return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
+
+/**
+ * Robustly extract a JSON object from a string that may be truncated.
+ * 1. Try normal JSON.parse first.
+ * 2. Strip markdown code fences.
+ * 3. Extract the first {...} block and attempt to repair truncated arrays/strings.
+ */
+function extractJSON(raw) {
+  // Step 1: strip markdown fences
+  let cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
+  // Step 2: try direct parse
+  try { return JSON.parse(cleaned); } catch {}
+
+  // Step 3: find first complete JSON object using brace counting
+  const start = cleaned.indexOf('{');
+  if (start === -1) throw new Error('No JSON object found in response.');
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < cleaned.length; i++) {
+    if (cleaned[i] === '{') depth++;
+    else if (cleaned[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+
+  if (end !== -1) {
+    // Found a complete JSON block
+    try { return JSON.parse(cleaned.slice(start, end + 1)); } catch {}
+  }
+
+  // Step 4: Response was truncated — attempt to auto-repair the JSON
+  // Take everything from { to end of string and close all open structures
+  let partial = cleaned.slice(start);
+
+  // Remove trailing incomplete string/array element (e.g. `"LangChain", "`)
+  partial = partial.replace(/,\s*"[^"]*$/, '');        // remove trailing incomplete string
+  partial = partial.replace(/,\s*$/, '');               // remove trailing comma
+
+  // Close any unclosed arrays
+  const openBrackets = (partial.match(/\[/g) || []).length;
+  const closeBrackets = (partial.match(/\]/g) || []).length;
+  for (let i = 0; i < openBrackets - closeBrackets; i++) partial += ']';
+
+  // Close any unclosed objects
+  const openBraces = (partial.match(/\{/g) || []).length;
+  const closeBraces = (partial.match(/\}/g) || []).length;
+  for (let i = 0; i < openBraces - closeBraces; i++) partial += '}';
+
+  try { return JSON.parse(partial); } catch (e) {
+    throw new Error('Failed to parse JSON from Gemini response. Raw output: ' + raw.slice(0, 300));
+  }
+}
+
 
 /**
  * RESUME PARSING ENGINE
@@ -68,15 +120,7 @@ ${resumeText}
 `;
 
   const raw = await callGemini(prompt);
-
-  // Strip markdown code fences if Gemini still wraps the output
-  const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    throw new Error('Failed to parse Gemini resume response as JSON. Raw output: ' + raw.slice(0, 200));
-  }
+  return extractJSON(raw);
 }
 
 /**
@@ -137,11 +181,5 @@ Summary: ${parsedResume.summary}
 `;
 
   const raw = await callGemini(prompt);
-  const cleaned = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    throw new Error('Failed to parse Gemini match response as JSON. Raw output: ' + raw.slice(0, 200));
-  }
+  return extractJSON(raw);
 }
