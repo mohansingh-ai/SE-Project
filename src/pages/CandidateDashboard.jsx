@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { db } from '../firebase';
 import {
   collection, query, where, onSnapshot, getDocs,
-  addDoc, updateDoc, doc, getDoc, serverTimestamp, increment
+  addDoc, updateDoc, deleteDoc, doc, getDoc, serverTimestamp, increment
 } from 'firebase/firestore';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
@@ -27,6 +27,7 @@ export default function CandidateDashboard() {
   const [applying, setApplying] = useState(null); // jobId being applied to
   const [activeTab, setActiveTab] = useState('applications'); // 'applications' | 'browse'
   const [error, setError] = useState('');
+  const [withdrawing, setWithdrawing] = useState(null); // appId being withdrawn
 
   // Load candidate profile
   useEffect(() => {
@@ -104,6 +105,25 @@ export default function CandidateDashboard() {
       setError('Failed to apply: ' + err.message);
     } finally {
       setApplying(null);
+    }
+  }
+
+  async function handleWithdraw(appId, jobId) {
+    if (!window.confirm('Are you sure you want to withdraw this application?')) return;
+    setError('');
+    setWithdrawing(appId);
+    try {
+      await deleteDoc(doc(db, 'applications', appId));
+      // Decrement application count on job
+      try {
+        await updateDoc(doc(db, 'jobs', jobId), { applicationCount: increment(-1) });
+      } catch (err) {
+        console.warn('Failed to decrement application count:', err);
+      }
+    } catch (err) {
+      setError('Failed to withdraw application: ' + err.message);
+    } finally {
+      setWithdrawing(null);
     }
   }
 
@@ -233,11 +253,24 @@ export default function CandidateDashboard() {
                         </div>
                       )}
 
-                      {app.matchDetails?.explanation && (
-                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: '0.75rem', lineHeight: '1.6' }}>
-                          🤖 {app.matchDetails.explanation}
-                        </p>
-                      )}
+                      <div className="flex items-center justify-between gap-3 mt-3" style={{ borderTop: '1px solid var(--border)', paddingTop: '0.75rem', flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: '200px' }}>
+                          {app.matchDetails?.explanation && (
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: '1.6', margin: 0 }}>
+                              🤖 {app.matchDetails.explanation}
+                            </p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary btn-sm"
+                          style={{ borderColor: 'var(--danger)', color: 'var(--danger)', background: 'none' }}
+                          onClick={() => handleWithdraw(app.id, app.jobId)}
+                          disabled={withdrawing === app.id}
+                        >
+                          {withdrawing === app.id ? 'Withdrawing…' : 'Withdraw'}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
