@@ -15,7 +15,8 @@ async function callGemini(prompt) {
       contents: [{ parts: [{ text: prompt }] }],
       generationConfig: {
         temperature: 0.2,
-        maxOutputTokens: 8192,  // Increased to handle long skill lists
+        maxOutputTokens: 8192,
+        responseMimeType: 'application/json', // Forces Gemini to always return valid complete JSON
       },
     }),
   });
@@ -158,13 +159,19 @@ SCORING RUBRIC (total = 100 points):
    - Relevant degree field = full points
    - Bootcamp/self-taught with strong skills = partial credit
 
-Return ONLY valid JSON — no markdown, no explanation:
+Return ONLY valid JSON — no markdown, no explanation, no code fences:
 {
   "score": <integer 0-100>,
   "matchedSkills": ["skill1", "skill2"],
   "missingSkills": ["skill3", "skill4"],
   "explanation": "2-3 sentence explanation of the match score"
 }
+
+IMPORTANT OUTPUT RULES:
+- Return ONLY the JSON object, nothing else.
+- "matchedSkills": list ONLY skills from Required Skills that the candidate HAS (max 10 items).
+- "missingSkills": list ONLY the TOP 8 most important missing skills. Do NOT list all missing skills.
+- "explanation": keep it under 60 words.
 
 JOB POSTING:
 Title: ${job.title}
@@ -175,9 +182,9 @@ Experience Level: ${job.experienceLevel}
 CANDIDATE PROFILE:
 Name: ${parsedResume.name}
 Skills: ${parsedResume.skills?.join(', ')}
-Education: ${parsedResume.education?.map(e => `${e.degree} from ${e.institution} (${e.year})`).join('; ')}
-Work Experience: ${parsedResume.workExperience?.map(w => `${w.title} at ${w.company} (${w.duration}): ${w.description}`).join(' | ')}
-Summary: ${parsedResume.summary}
+Education: ${parsedResume.education?.map(e => `${e.degree} from ${e.institution}`).join('; ')}
+Work Experience: ${parsedResume.workExperience?.slice(0, 3).map(w => `${w.title} at ${w.company} (${w.duration})`).join(' | ')}
+Summary: ${parsedResume.summary?.slice(0, 300)}
 `;
 
   const raw = await callGemini(prompt);
